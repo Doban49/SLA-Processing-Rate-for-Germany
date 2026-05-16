@@ -1,0 +1,276 @@
+WITH PUBLIC_HOLIDAYS_NRW AS (
+    -- 2024
+    SELECT TO_DATE('2024-01-01') AS holiday_date, 'Neujahr 2024' UNION ALL
+    SELECT TO_DATE('2024-12-31'), 'Custom: 31.12.2024' UNION ALL
+    SELECT TO_DATE('2024-12-24'), 'Custom: 24.12.2024' UNION ALL
+    SELECT TO_DATE('2024-03-29'), 'Karfreitag 2024' UNION ALL
+    SELECT TO_DATE('2024-04-01'), 'Ostermontag 2024' UNION ALL
+    SELECT TO_DATE('2024-05-01'), 'Tag der Arbeit 2024' UNION ALL
+    SELECT TO_DATE('2024-05-09'), 'Christi Himmelfahrt 2024' UNION ALL
+    SELECT TO_DATE('2024-05-20'), 'Pfingstmontag 2024' UNION ALL
+    SELECT TO_DATE('2024-05-30'), 'Fronleichnam 2024' UNION ALL
+    SELECT TO_DATE('2024-10-03'), 'Tag der Deutschen Einheit 2024' UNION ALL
+    SELECT TO_DATE('2024-11-01'), 'Allerheiligen 2024' UNION ALL
+    SELECT TO_DATE('2024-12-25'), '1. Weihnachtstag 2024' UNION ALL
+    SELECT TO_DATE('2024-12-26'), '2. Weihnachtstag 2024'
+
+    UNION ALL
+    -- 2025
+    SELECT TO_DATE('2025-01-01'), 'Neujahr 2025' UNION ALL
+    SELECT TO_DATE('2025-12-31'), 'Custom: 31.12.2025' UNION ALL
+    SELECT TO_DATE('2025-04-18'), 'Karfreitag 2025' UNION ALL
+    SELECT TO_DATE('2025-04-21'), 'Ostermontag 2025' UNION ALL
+    SELECT TO_DATE('2025-05-01'), 'Tag der Arbeit 2025' UNION ALL
+    SELECT TO_DATE('2025-05-29'), 'Christi Himmelfahrt 2025' UNION ALL
+    SELECT TO_DATE('2025-06-09'), 'Pfingstmontag 2025' UNION ALL
+    SELECT TO_DATE('2025-06-19'), 'Fronleichnam 2025' UNION ALL
+    SELECT TO_DATE('2025-10-03'), 'Tag der Deutschen Einheit 2025' UNION ALL
+    SELECT TO_DATE('2025-11-01'), 'Allerheiligen 2025' UNION ALL
+    SELECT TO_DATE('2025-12-24'), 'Custom: 24.12.2025' UNION ALL
+    SELECT TO_DATE('2025-12-25'), '1. Weihnachtstag 2025' UNION ALL
+    SELECT TO_DATE('2025-12-26'), '2. Weihnachtstag 2025'
+
+    UNION ALL
+    -- 2026
+    SELECT TO_DATE('2026-01-01'), 'Neujahr 2026' UNION ALL
+    SELECT TO_DATE('2026-12-31'), 'Custom: 31.12.2026' UNION ALL
+    SELECT TO_DATE('2026-04-03'), 'Karfreitag 2026' UNION ALL
+    SELECT TO_DATE('2026-04-06'), 'Ostermontag 2026' UNION ALL
+    SELECT TO_DATE('2026-05-01'), 'Tag der Arbeit 2026' UNION ALL
+    SELECT TO_DATE('2026-05-14'), 'Christi Himmelfahrt 2026' UNION ALL
+    SELECT TO_DATE('2026-05-25'), 'Pfingstmontag 2026' UNION ALL
+    SELECT TO_DATE('2026-06-04'), 'Fronleichnam 2026' UNION ALL
+    SELECT TO_DATE('2026-10-03'), 'Tag der Deutschen Einheit 2026' UNION ALL
+    SELECT TO_DATE('2026-11-01'), 'Allerheiligen 2026' UNION ALL
+    SELECT TO_DATE('2026-12-24'), 'Custom: 24.12.2026' UNION ALL
+    SELECT TO_DATE('2026-12-25'), '1. Weihnachtstag 2026' UNION ALL
+    SELECT TO_DATE('2026-12-26'), '2. Weihnachtstag 2026'
+),
+
+
+ NEXT_WORKING_DAY AS (
+        -- Anchor member: start with Order_Creation_Date + 1
+        SELECT 
+            o."Id" AS order_id,
+            o."Order_Creation_Date",
+            DATEADD(day, 1, DATE(o."Order_Creation_Date")) AS candidate_date,
+            o."Client_Id_Nr"
+        FROM Database."Order" o
+        WHERE o."Client_Id_Nr" = :clientid
+          AND o."Order_Creation_Date" = :daterange
+
+        UNION ALL
+
+        -- Recursive member: increment candidate_date by 1 until it's a working day
+        SELECT 
+            nwd.order_id,
+            nwd."Order_Creation_Date",
+            DATEADD(day, 1, nwd.candidate_date),
+            nwd."Client_Id_Nr"
+        FROM NEXT_WORKING_DAY nwd
+        LEFT JOIN PUBLIC_HOLIDAYS_NRW ph ON nwd.candidate_date = ph.holiday_date
+        WHERE 
+            DAYOFWEEK(nwd.candidate_date) IN (6, 0)  -- 1=Sunday, 7=Saturday // ist es nicht 0=Sunday und 6=Samstag
+            OR ph.holiday_date IS NOT NULL
+    ),
+-- Final selection: choose the first candidate_date that's a working day
+
+
+Next_Working_Day_Final AS (
+SELECT 
+    order_id,
+    "Order_Creation_Date",
+    MIN(candidate_date) AS next_working_day
+FROM NEXT_WORKING_DAY nwd
+LEFT JOIN PUBLIC_HOLIDAYS_NRW ph ON nwd.candidate_date = ph.holiday_date
+WHERE DAYOFWEEK(nwd.candidate_date) NOT IN (6, 0)
+  AND ph.holiday_date IS NULL
+GROUP BY order_id, "Order_Creation_Date"
+),
+
+
+Sent_on_Time_Table AS (
+
+Select
+ord."Id"as "Order Id",
+ord."External_Order_Number",
+sh."Name_Client", 
+ord."Order_Creation_Date",
+sh."SHIPMENT_Id_Nr",
+shista."Id",
+shista."ReadyToShipDate",
+shista."FirstDeliveryOn",
+ord."BackOrder",
+//DAYOFWEEK(ord."Order_Creation_Date"),
+//DAYOFWEEK(shista."ReadyToShipDate"),
+//:datebucket(ord."Order_Creation_Date") as "Time Group (Year, Month etc.)",
+
+CASE DAYOFWEEK(ord."Order_Creation_Date")
+    WHEN 1 THEN 'Monday'
+    WHEN 2 THEN 'Tuesday'
+    WHEN 3 THEN 'Wednesday'
+    WHEN 4 THEN 'Thursday'
+    WHEN 5 THEN 'Friday'
+    WHEN 6 THEN 'Saturday'
+    WHEN 0 THEN 'Sunday'
+END AS "weekday",
+
+CASE MONTH(ord."Order_Creation_Date")
+    WHEN 1 THEN 'January'
+    WHEN 2 THEN 'February'
+    WHEN 3 THEN 'March'
+    WHEN 4 THEN 'April'
+    WHEN 5 THEN 'May'
+    WHEN 6 THEN 'June'
+    WHEN 7 THEN 'July'
+    WHEN 8 THEN 'August'
+    WHEN 9 THEN 'September'
+    WHEN 10 THEN 'October'
+    WHEN 11 THEN 'November'
+    WHEN 12 THEN 'December'
+END AS "month",
+
+
+
+
+// Ready to be shipped same day
+CASE
+    WHEN  DATE(ord."Order_Creation_Date") = DATE(shista."ReadyToShipDate")
+                AND DAYOFWEEK(ord."Order_Creation_Date") IN (1, 2, 3, 4, 5) 
+    THEN 1
+    
+// Ready to be shipped next day after XX:XX on working days    
+    WHEN (DAYOFWEEK(ord."Order_Creation_Date") IN (1, 2 , 3, 4) AND TO_TIME(ord."Order_Creation_Date") > 'XX:XX:XX')
+                AND DATE(shista."ReadyToShipDate") = DATE(ord."Order_Creation_Date") + 1 
+    THEN 1
+    
+
+//Orders received Friday after deadline and on the weekend 
+    WHEN ((DAYOFWEEK(ord."Order_Creation_Date") = 5 AND TO_TIME(ord."Order_Creation_Date") > 'XX:XX:XX')  
+        OR (DAYOFWEEK(ord."Order_Creation_Date") = 6)                                          
+        OR (DAYOFWEEK(ord."Order_Creation_Date") = 0 )) 
+        And (DAYOFWEEK(shista."ReadyToShipDate") IN (6,0,1) OR DATE(shista."ReadyToShipDate") = nwdf.next_working_day)
+    THEN 1
+
+// Orders received on public holidays 
+    WHEN  DATE(ord."Order_Creation_Date") IN (SELECT holiday_date FROM PUBLIC_HOLIDAYS_NRW) AND DATE(shista."ReadyToShipDate") BETWEEN DATE(ord."Order_Creation_Date") AND nwdf.next_working_day
+    THEN 1
+    
+// Orders received day before public holiday after deadline
+
+    WHEN DATEADD(day, 1, DATE(ord."Order_Creation_Date")) IN (SELECT holiday_date FROM PUBLIC_HOLIDAYS_NRW) AND TO_TIME(ord."Order_Creation_Date") > 'XX:XX:XX' AND DATE(shista."ReadyToShipDate") BETWEEN                       DATE(ord."Order_Creation_Date") AND nwdf.next_working_day 
+    THEN 1
+
+ 
+    ELSE 0
+END AS "sent on time",
+
+
+// Same Code but now for shipment creation date
+CASE
+    WHEN  DATE(sh."Order_Creation_Date") = DATE(shista."ReadyToShipDate")
+                AND DAYOFWEEK(sh."Order_Creation_Date") IN (1, 2, 3, 4, 5) 
+    THEN 1
+    
+// Ready to be shipped next day after XX:XX on working days    
+    WHEN (DAYOFWEEK(sh."Order_Creation_Date") IN (1, 2 , 3, 4) AND TO_TIME(sh."Order_Creation_Date") > 'XX:XX:XX')
+                AND DATE(shista."ReadyToShipDate") = DATE(sh."Order_Creation_Date") + 1 
+    THEN 1
+    
+
+//Orders received Friday after deadline and on the weekend 
+    WHEN ((DAYOFWEEK(sh."Order_Creation_Date") = 5 AND TO_TIME(sh."Order_Creation_Date") > 'XX:XX:XX')  
+        OR (DAYOFWEEK(sh."Order_Creation_Date") = 6)                                          
+        OR (DAYOFWEEK(sh."Order_Creation_Date") = 0 )) 
+         And (DAYOFWEEK(shista."ReadyToShipDate") IN (6,0,1) OR DATE(shista."ReadyToShipDate") = nwdf.next_working_day)
+    THEN 1
+
+// Orders received on public holidays 
+    WHEN  DATE(sh."Order_Creation_Date") IN (SELECT holiday_date FROM PUBLIC_HOLIDAYS_NRW) AND DATE(shista."ReadyToShipDate") BETWEEN DATE(sh."Order_Creation_Date") AND nwdf.next_working_day
+    THEN 1
+    
+// Orders received day before public holiday after deadline
+
+    WHEN DATEADD(day, 1, DATE(sh."Order_Creation_Date")) IN (SELECT holiday_date FROM PUBLIC_HOLIDAYS_NRW) AND TO_TIME(sh."Order_Creation_Date") > 'XX:XX:XX' AND DATE(shista."ReadyToShipDate") BETWEEN DATE(sh."Order_Creation_Date") AND nwdf.next_working_day 
+    THEN 1
+
+ 
+    ELSE 0
+END AS "sent on time (shipment creation)",
+
+
+
+
+
+//Whether it is the first shipment to ex
+CASE 
+    WHEN ROW_NUMBER() OVER (PARTITION BY ord."Id" ORDER BY sh."Order_Creation_Date" ) = 1 
+        THEN TRUE
+        ELSE FALSE 
+END AS "First Shipment",
+        
+
+
+from
+        Database."Order" ord
+        LEFT JOIN Database."Shipment" sh on sh.orderid = ord."Id"
+        LEFT JOIN Database."ShipmentStatus" shista on shista."Id" = sh."SHIPMENT_Id_Nr"
+        LEFT JOIN Next_Working_Day_Final nwdf on nwdf."Order_Creation_Date" = ord."Order_Creation_Date"
+        //LEFT JOIN NextWorkingDayAfterHoliday nwd ON nwd.order_id = ord."Id"
+        //LEFT JOIN NextWorkingDayAfterLatePreHoliday nwd2 ON nwd2.order_id = ord."Id"
+        Left Join Database."Client" cli on cli."Id" = ord."Client_Id_Nr"
+where   ord."Client_Id_Nr" = :clientid
+        and ord."Order_Creation_Date" = :daterange
+        and (ord."BackOrder" = FALSE OR ord."BackOrder" IS NULL)
+        and ord."Name_Order_Type" NOT IN ('B2B')
+        // and shista."Id" IS NOT NULL
+        and ord."Id" IS NOT NULL
+        and sh."SHIPMENT_Id_Nr" IS NOT NULL
+        and ord."Valid" = TRUE
+        and  (ord."OnHold" IS NULL OR ord."OnHold" =0)
+        //and ord."Id" IN (XXXXXXXX,XXXXXXXX,XXXXXXXX)
+        //and loc."Type" NOT IN ('RETURN','DAMAGED')
+
+)
+
+SELECT
+
+any_value ("Name_Client") as "Name of Client",
+:datebucket("Order_Creation_Date") as "Time Group (Year, Month etc.)",
+any_value("weekday") as "Weekday", // muss augeschaltet werden wenn andere Gruppierung als Tag gewählt wird. 
+//any_value("month") as "Month",
+
+Count (DISTINCT "Order Id") as "Number of Orders",
+//2546 AS "Number of Orders",
+
+SUM ("sent on time")/Count (DISTINCT "Order Id") *100 as "SLA Compliance in %",
+COUNT_IF("sent on time" = 0) as "Number of delayed Orders",
+SUM ("sent on time (shipment creation)")/Count (DISTINCT "Order Id") *100 as "SLA Compliance in % (Shipment Creation Date)",
+COUNT_IF("sent on time (shipment creation)" = 0) as "Num. delayed Ord. (Shipment Creation Date)",
+//AVG("sent on time") OVER (PARTITION BY "Name_Client") * 100 as "SLA Compliance in %",
+from Sent_on_Time_Table
+where "First Shipment" = TRUE
+
+/*
+//July
+and DATE("Order_Creation_Date") <> '2026-03-08' // Technical issues the day before
+
+//September
+and  NOT (DATE("Order_Creation_Date") IN ('2025-07-12', '2025-07-13','2025-07-14','2025-07-15')) // loss of internet connection
+
+*/
+group by :datebucket("Order_Creation_Date"), "Name_Client"
+order by "Name_Client", :datebucket("Order_Creation_Date");
+
+
+
+
+
+
+
+
+
+
+
+
+
